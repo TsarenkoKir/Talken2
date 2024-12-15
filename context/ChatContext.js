@@ -1,8 +1,8 @@
-import { createContext, useState, useEffect } from "react";
+import { createContext, useState, useCallback } from "react";
 import Router from "next/router";
 import { ChatContractAddress } from "../config";
 import ChatAbi from "../backend/build/contracts/ChatContract.json";
-import { ethers } from "ethers";
+import { BrowserProvider, Contract } from "quais";
 
 export const ChatContext = createContext();
 
@@ -19,19 +19,26 @@ export const ChatProvider = ({ children }) => {
   const [searchAccount, setSearchAccount] = useState("");
   const [friendsList, setFriendsList] = useState([]);
   const [messagesList, setMessagesList] = useState([]);
-  // Calls Metamask to connect wallet on clicking Connect Wallet button
+
+  const initializeProvider = () => {
+    if (typeof window === "undefined") return null;
+    const { pelagus } = window;
+    if (!pelagus) {
+      alert("Pelagus Wallet not found");
+      return null;
+    }
+    return new BrowserProvider(pelagus);
+  };
+
   const connectWallet = async () => {
     try {
-      const { ethereum } = window;
-      if (!ethereum) {
-        alert("Get MetaMask!");
-        return;
-      }
-      let chainId = await ethereum.request({ method: "eth_chainId" });
-      console.log("Connected to " + chainId);
-      const rinkebyChainId = "0x5";
-      if (chainId !== rinkebyChainId) {
-        console.log("Please connect to Goerli Test Network");
+      const provider = initializeProvider();
+      if (!provider) return;
+
+      const { pelagus } = window;
+      const chainId = await pelagus.request({ method: "quai_chainId" });
+      const ChainId = "0x2328"; // Используем корректный chainId для вашей сети
+      if (chainId !== ChainId) {
         setCorrectNetwork(false);
         setNetworkError(true);
         return;
@@ -39,255 +46,192 @@ export const ChatProvider = ({ children }) => {
         setCorrectNetwork(true);
         setNetworkError(false);
       }
-      const accounts = await ethereum.request({
-        method: "eth_requestAccounts",
-      });
-      console.log("Found accounts: ", accounts);
+
+      const accounts = await pelagus.request({ method: "quai_requestAccounts" });
       setIsUserLoggedIn(true);
       setCurrentAccount(accounts[0]);
     } catch (error) {
-      console.log(error);
+      alert("Failed to connect wallet");
     }
   };
 
-  // Register User from front-end onto the blockchain
   const registerUser = async (event) => {
     event.preventDefault();
     try {
-      console.log("Registering user");
-      const { ethereum } = window;
-      if (ethereum) {
-        const provider = new ethers.providers.Web3Provider(ethereum);
-        const signer = provider.getSigner();
-        const chatContract = new ethers.Contract(
-          ChatContractAddress,
-          ChatAbi.abi,
-          signer
-        );
-        await chatContract
-          .registerUser(currentAccount, username, password)
-          .then((res) => {
-            alert("User Registered successfully");
-          });
+      const provider = initializeProvider();
+      if (!provider) return;
+      const signer = await provider.getSigner();
+      const chatContract = new Contract(ChatContractAddress, ChatAbi.abi, signer);
+
+      const tx = await chatContract.registerUser(currentAccount, username, password);
+      const receipt = await tx.wait();
+      if (receipt.status === 1) {
+        alert("User Registered successfully");
       } else {
-        alert("Please connect to MetaMask");
+        alert("Registration transaction failed");
       }
     } catch (error) {
-      alert("Error: User Already Exist!", error);
+      alert("Registration error");
     }
   };
 
-  // User LogIn from front-end onto the blockchain
   const loginUser = async (event) => {
     event.preventDefault();
     try {
-      console.log("User LogIn");
-      const { ethereum } = window;
-      if (ethereum) {
-        const provider = new ethers.providers.Web3Provider(ethereum);
-        const signer = provider.getSigner();
-        const chatContract = new ethers.Contract(
-          ChatContractAddress,
-          ChatAbi.abi,
-          signer
-        );
+      const provider = initializeProvider();
+      if (!provider) return;
+      const signer = await provider.getSigner();
+      const chatContract = new Contract(ChatContractAddress, ChatAbi.abi, signer);
 
-        const tx = await chatContract.loginUser(
-          currentAccount,
-          username,
-          password
-        ); // 100ms
-        const rc = await tx.wait(); // 0ms, as tx is already confirmed
-        const event = rc.events.find((event) => event.event === "LoginUser");
-        const [isUserLoggedIn] = await event.args;
-        console.log(isUserLoggedIn);
-        if (isUserLoggedIn) {
-          console.log("User LoggedIn successfully");
-          Router.push("/ChatHome");
-        } else {
-          alert("User LoggedIn failed");
-        }
+      const tx = await chatContract.loginUser(currentAccount, username, password);
+      const receipt = await tx.wait();
+      if (receipt.status === 1) {
+        Router.push("/ChatHome");
       } else {
-        alert("Please connect to MetaMask");
+        alert("Login failed");
       }
     } catch (error) {
-      console.log("Error: ", error);
+      alert("Login error");
     }
   };
 
-  // User LogOut from front-end onto the blockchain
   const logoutUser = async (event) => {
     event.preventDefault();
     try {
       console.log("User LogOut");
-      const { ethereum } = window;
-      if (ethereum) {
-        const provider = new ethers.providers.Web3Provider(ethereum);
-        const signer = provider.getSigner();
-        const chatContract = new ethers.Contract(
-          ChatContractAddress,
-          ChatAbi.abi,
-          signer
-        );
-        const tx = await chatContract.logoutUser(currentAccount);
-        const rc = await tx.wait(); // 0ms, as tx is already confirmed
-        const event = rc.events.find((event) => event.event === "LogoutUser");
-        const [isUserLoggedIn] = await event.args;
+  
+      // Check if Pelagus wallet is available in the browser
+      const { pelagus } = window;
+      if (!pelagus) {
+        alert("Please install the Pelagus Wallet!");
+        return;
+      }
+  
+      // Create a provider for interacting with the Pelagus wallet
+      const provider = new BrowserProvider(pelagus);
+  
+      // Get the signer for sending transactions
+      const signer = await provider.getSigner();
+  
+      // Create a contract instance
+      const chatContract = new Contract(ChatContractAddress, ChatAbi.abi, signer);
+  
+      // Call the logoutUser function in the smart contract
+      const tx = await chatContract.logoutUser(currentAccount);
+      console.log("Transaction sent:", tx);
+  
+      // Wait for the transaction to be confirmed
+      const receipt = await tx.wait();
+      console.log("Transaction confirmed:", receipt);
+  
+      // Look for the LogoutUser event in the transaction receipt
+      const logoutEvent = receipt.logs.find((log) => {
+        // Parse the logs using the contract's interface
+        const parsedLog = chatContract.interface.parseLog(log);
+        return parsedLog.name === "LogoutUser";
+      });
+  
+      if (logoutEvent) {
+        const [isUserLoggedIn] = logoutEvent.args;
+        console.log("Logout Event Args:", isUserLoggedIn);
+  
         if (!isUserLoggedIn) {
           console.log("User LoggedOut successfully");
           Router.push("/");
         } else {
-          alert("User LoggedOut failed");
+          alert("User LogOut failed");
         }
       } else {
-        alert("Please connect to MetaMask");
+        alert("Logout event not found in the transaction receipt.");
       }
     } catch (error) {
-      console.log("Error: ", error);
+      console.error("Error during user logout:", error);
+      alert(`Error: ${error.message || "Failed to log out!"}`);
     }
   };
 
-  // User Search and add friend from front-end onto the blockchain
   const searchAndAddFriend = async (event) => {
     event.preventDefault();
     try {
-      console.log("User Search and Add Friend");
-      const { ethereum } = window;
-      if (ethereum) {
-        const provider = new ethers.providers.Web3Provider(ethereum);
-        const signer = provider.getSigner();
-        const chatContract = new ethers.Contract(
-          ChatContractAddress,
-          ChatAbi.abi,
-          signer
-        );
-        //Check if user exists.
-        let boolcheckUser = await chatContract.checkUserExists(searchAccount);
-        //If user exists and not adding self as friend.
-        if (
-          boolcheckUser &&
-          searchAccount.toLowerCase() != currentAccount.toLowerCase()
-        ) {
-          //get the username of the searched account to add as friend.
-          let friendUsername = await chatContract.getUsername(searchAccount);
-          //check if already friends.
-          console.log("friendUsername: ", searchAccount, currentAccount);
+      const provider = initializeProvider();
+      if (!provider) return;
+      const signer = await provider.getSigner();
+      const chatContract = new Contract(ChatContractAddress, ChatAbi.abi, signer);
 
-          // Add friend to the current user.
-          await chatContract
-            .addFriend(searchAccount, friendUsername)
-            .then((res) => {
-              alert("Friend Added successfully");
-            });
-        }
-        //If user does not exist and not adding self as friend then throw error.
-        else {
-          if (!boolcheckUser) {
-            alert("User doesn't exist");
-          } else {
-            alert("Can't add yourself as friend");
-          }
+      const boolcheckUser = await chatContract.checkUserExists(searchAccount);
+      if (boolcheckUser && searchAccount.toLowerCase() !== currentAccount.toLowerCase()) {
+        const friendUsername = await chatContract.getUsername(searchAccount);
+        const tx = await chatContract.addFriend(searchAccount, friendUsername);
+        const receipt = await tx.wait();
+        if (receipt.status === 1) {
+          alert("Friend added successfully!");
+        } else {
+          alert("Failed to add friend");
         }
       } else {
-        alert("Please connect to MetaMask");
+        alert("User does not exist or you are adding yourself");
       }
     } catch (error) {
-      alert("Error: Users are Already Friends! ", error);
+      alert("Add friend error");
     }
   };
 
-  // Show User friends to front-end from the blockchain
-  const getMyFriendList = async (event) => {
+  const getMyFriendList = useCallback(async () => {
     try {
-      console.log("Show User friends");
-      const { ethereum } = window;
-      if (ethereum) {
-        const provider = new ethers.providers.Web3Provider(ethereum);
-        const signer = provider.getSigner();
-        const chatContract = new ethers.Contract(
-          ChatContractAddress,
-          ChatAbi.abi,
-          signer
-        );
+      const provider = initializeProvider();
+      if (!provider) return;
+      const signer = await provider.getSigner();
+      const chatContract = new Contract(ChatContractAddress, ChatAbi.abi, signer);
 
-        // Add friend to the current user.
-        setFriendsList(await chatContract.getMyFriendList());
-      } else {
-        alert("Please connect to MetaMask");
-      }
+      const fetchedFriendsList = await chatContract.getMyFriendList();
+      setFriendsList(Array.isArray(fetchedFriendsList) ? fetchedFriendsList : []);
     } catch (error) {
-      console.log("Error: ", error);
+      alert("Error fetching friend list");
     }
-  };
+  }, []);
 
-  // Show friends Messages to front-end from the blockchain
   const sendMessage = async (friendAddr) => {
     try {
-      console.log("Send Message to Friends");
-      const { ethereum } = window;
-      if (ethereum) {
-        const provider = new ethers.providers.Web3Provider(ethereum);
-        const signer = provider.getSigner();
-        const chatContract = new ethers.Contract(
-          ChatContractAddress,
-          ChatAbi.abi,
-          signer
-        );
-
-        // Add friend to the current user.
-        await chatContract.sendMessage(selectedAddr, messageInput);
-      } else {
-        alert("Please connect to MetaMask");
+      if (!friendAddr || !messageInput) {
+        alert("No friend selected or message is empty.");
+        return;
       }
+      const provider = initializeProvider();
+      if (!provider) return;
+      const signer = await provider.getSigner();
+      const chatContract = new Contract(ChatContractAddress, ChatAbi.abi, signer);
+
+      const tx = await chatContract.sendMessage(friendAddr, messageInput);
+      const receipt = await tx.wait();
+      if (receipt.status !== 1) {
+        alert("Message sending failed");
+        return;
+      }
+      alert("Message sent!");
+      setMessageInput("");
+      await showMessages(friendAddr);
     } catch (error) {
-      console.log("Error: ", error);
+      alert("Send message error");
     }
   };
 
-  // Show friends Messages to front-end from the blockchain
   const showMessages = async (friendAddr) => {
     try {
-      console.log("Show User friends");
-      const { ethereum } = window;
-      if (ethereum) {
-        const provider = new ethers.providers.Web3Provider(ethereum);
-        const signer = provider.getSigner();
-        const chatContract = new ethers.Contract(
-          ChatContractAddress,
-          ChatAbi.abi,
-          signer
-        );
-
-        // Add friend to the current user.
-        setMessagesList(await chatContract.readMessage(friendAddr));
-        setSelectedAddr(friendAddr);
-      } else {
-        alert("Please connect to MetaMask");
+      if (!friendAddr) {
+        alert("Invalid friend address");
+        return;
       }
-    } catch (error) {
-      console.log("Error: ", error);
-    }
-  };
 
-  // User LogIn from front-end onto the blockchain
-  const checkIsUserLogged = async (event) => {
-    try {
-      console.log("Check User is LoggedIn");
-      const { ethereum } = window;
-      if (ethereum) {
-        const provider = new ethers.providers.Web3Provider(ethereum);
-        const signer = provider.getSigner();
-        const chatContract = new ethers.Contract(
-          ChatContractAddress,
-          ChatAbi.abi,
-          signer
-        );
-        chatContract.checkIsUserLogged(currentAccount);
-      } else {
-        alert("Please connect to MetaMask");
-      }
+      const provider = initializeProvider();
+      if (!provider) return;
+      const signer = await provider.getSigner();
+      const chatContract = new Contract(ChatContractAddress, ChatAbi.abi, signer);
+
+      const fetchedMessages = await chatContract.readMessage(friendAddr);
+      setMessagesList(Array.isArray(fetchedMessages) ? fetchedMessages : []);
+      setSelectedAddr(friendAddr);
     } catch (error) {
-      console.log("Error: ", error);
+      alert("Error fetching messages");
     }
   };
 
@@ -316,8 +260,10 @@ export const ChatProvider = ({ children }) => {
         showMessages,
         setMessageInput,
         sendMessage,
-        setSelectedUserName,
         selectedUserName,
+        setSelectedUserName,
+        selectedAddr,
+        setSelectedAddr
       }}
     >
       {children}

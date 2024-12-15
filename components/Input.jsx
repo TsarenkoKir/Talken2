@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useContext } from "react";
-import Router from "next/router";
-import Link from "next/link";
 import { ChatContext } from "../context/ChatContext";
 
 const Input = () => {
-  const { setSearchAccount, searchAndAddFriend, setMessageInput, sendMessage } =
-    useContext(ChatContext);
+  const {
+    setSearchAccount,
+    searchAndAddFriend,
+    setMessageInput,
+    sendMessage,
+    selectedAddr, // убедитесь, что этот стейт доступен здесь
+  } = useContext(ChatContext);
+
+  const handleSend = () => {
+    if (!selectedAddr) {
+      alert("No friend selected");
+      return;
+    }
+    sendMessage(selectedAddr);
+  };
 
   return (
     <div className="input">
@@ -16,7 +27,7 @@ const Input = () => {
         onChange={(e) => setMessageInput(e.target.value)}
       />
       <div className="send">
-        <button onClick={sendMessage}>Send</button>
+        <button onClick={handleSend}>Send</button>
       </div>
     </div>
   );
